@@ -290,18 +290,23 @@ void DBImpl::RemoveObsoleteFiles() {
 }
 
 Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
+  // 确定是拿到了锁
   mutex_.AssertHeld();
 
   // Ignore error from CreateDir since the creation of the DB is
   // committed only when the descriptor is created, and this directory
   // may already exist from a previous failed creation attempt.
+  // 只管创建，不管失败（比如路径已存在）
   env_->CreateDir(dbname_);
   assert(db_lock_ == nullptr);
+  // db_lock_是一个文件锁，对应着LOCK这个文件，主要用途是保证这个数据库只有当前进程使用
   Status s = env_->LockFile(LockFileName(dbname_), &db_lock_);
   if (!s.ok()) {
     return s;
   }
 
+  // current file是记录着最新的manifest文件
+  // manifest中每一条记录都是一个versionEdit，每个versionEdit都表示一次sstable的变化
   if (!env_->FileExists(CurrentFileName(dbname_))) {
     if (options_.create_if_missing) {
       Log(options_.info_log, "Creating DB %s since it was missing.",
@@ -1482,12 +1487,15 @@ DB::~DB() = default;
 
 Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   *dbptr = nullptr;
-
+  // 创建db的实例化对象
   DBImpl* impl = new DBImpl(options, dbname);
+  // 简单的加锁
   impl->mutex_.Lock();
+  // leveldb使用VersionEdit来表示变化
   VersionEdit edit;
   // Recover handles create_if_missing, error_if_exists
   bool save_manifest = false;
+  // 核心逻辑都在recover中
   Status s = impl->Recover(&edit, &save_manifest);
   if (s.ok() && impl->mem_ == nullptr) {
     // Create new log and a corresponding memtable.
